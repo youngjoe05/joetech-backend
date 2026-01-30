@@ -1,136 +1,127 @@
-const express = require('express');
-const fs = require('fs');
-const path = require('path');
-const cors = require('cors');
+const express = require("express");
+const fs = require("fs");
+const cors = require("cors");
+const bcrypt = require("bcryptjs");
+const jwt = require("jsonwebtoken");
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-const usersFile = path.join(__dirname, 'users.json');
-const ordersFile = path.join(__dirname, 'orders.json');
+const PORT = process.env.PORT || 10000;
+const SECRET = "joetech_secret_key";
 
-/* =======================
-   HELPERS
-======================= */
+// ---------- Helpers ----------
 function readJSON(file) {
-  if (!fs.existsSync(file)) {
-    fs.writeFileSync(file, JSON.stringify([]));
-  }
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (!fs.existsSync(file)) return [];
+  return JSON.parse(fs.readFileSync(file));
 }
 
 function writeJSON(file, data) {
   fs.writeFileSync(file, JSON.stringify(data, null, 2));
 }
 
-/* =======================
-   AUTH ROUTES
-======================= */
+function auth(req, res, next) {
+  const token = req.headers.authorization;
+  if (!token) return res.status(401).json({ error: "No token" });
 
-// SIGN UP
-app.post('/signup', (req, res) => {
+  try {
+    req.user = jwt.verify(token, SECRET);
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+// ---------- AUTH ----------
+app.post("/signup", async (req, res) => {
   const { username, password } = req.body;
+  const users = readJSON("users.json");
 
-  if (!username || !password) {
-    return res.status(400).json({ message: 'Username and password required' });
-  }
+  if (users.find(u => u.username === username))
+    return res.status(400).json({ error: "User exists" });
 
-  const users = readJSON(usersFile);
+  const hashed = await bcrypt.hash(password, 10);
+  users.push({ username, password: hashed, balance: 0 });
+  writeJSON("users.json", users);
 
-  const exists = users.find(u => u.username === username);
-  if (exists) {
-    return res.status(400).json({ message: 'User already exists' });
-  }
-
-  users.push({
-    username,
-    password,
-    nairaBalance: 0,
-    usdBalance: 0
-  });
-
-  writeJSON(usersFile, users);
-  res.json({ message: 'Signup successful' });
+  res.json({ message: "Signup successful" });
 });
 
-// LOGIN
-app.post('/login', (req, res) => {
+app.post("/login", async (req, res) => {
   const { username, password } = req.body;
+  const users = readJSON("users.json");
+  const user = users.find(u => u.username === username);
 
-  const users = readJSON(usersFile);
-  const user = users.find(
-    u => u.username === username && u.password === password
-  );
+  if (!user || !(await bcrypt.compare(password, user.password)))
+    return res.status(400).json({ error: "Invalid login" });
 
-  if (!user) {
-    return res.status(401).json({ message: 'Invalid login details' });
-  }
+  const token = jwt.sign({ username }, SECRET, { expiresIn: "7d" });
+  res.json({ token });
+});
 
-  res.json({
-    message: 'Login successful',
-    username,
-    nairaBalance: user.nairaBalance,
-    usdBalance: user.usdBalance
+// ---------- WALLET ----------
+app.get("/balance", auth, (req, res) => {
+  const users = readJSON("users.json");
+  const user = users.find(u => u.username === req.user.username);
+  res.json({ balance: user.balance });
+});
+
+// ---------- FUND REQUEST SYSTEM ----------
+app.post("/fund-request", auth, (req, res) => {
+  const { amount, method, reference } = req.body;
+  const requests = readJSON("requests.json");
+
+  requests.push({
+    id: "req_" + Date.now(),
+    username: req.user.username,
+    amount,
+    method,
+    reference,
+    status: "pending",
+    date: new Date().toISOString()
   });
+
+  writeJSON("requests.json", requests);
+  res.json({ message: "Funding request submitted" });
 });
 
-/* =======================
-   USER BALANCE
-======================= */
-
-// GET USER BALANCE
-app.get('/balance/:username', (req, res) => {
-  const users = readJSON(usersFile);
-  const user = users.find(u => u.username === req.params.username);
-
-  if (!user) {
-    return res.status(404).json({ message: 'User not found' });
-  }
-
-  res.json({
-    nairaBalance: user.nairaBalance,
-    usdBalance: user.usdBalance
-  });
+app.get("/my-requests", auth, (req, res) => {
+  const requests = readJSON("requests.json");
+  res.json(requests.filter(r => r.username === req.user.username));
 });
 
-/* =======================
-   ORDERS
-======================= */
+// ---------- ADMIN ----------
+app.get("/admin/requests", auth, (req, res) => {
+  if (req.user.username !== "youngjoe05")
+    return res.status(403).json({ error: "Forbidden" });
 
-// GET ALL ORDERS
-app.get('/orders', (req, res) => {
-  const orders = readJSON(ordersFile);
-  res.json(orders);
+  res.json(readJSON("requests.json"));
 });
 
-// CREATE ORDER
-app.post('/orders', (req, res) => {
-  const orders = readJSON(ordersFile);
+app.post("/admin/approve", auth, (req, res) => {
+  if (req.user.username !== "youngjoe05")
+    return res.status(403).json({ error: "Forbidden" });
 
-  const newOrder = {
-    ...req.body,
-    id: Date.now(),
-    status: 'pending',
-    createdAt: new Date().toISOString()
-  };
+  const { requestId } = req.body;
+  const requests = readJSON("requests.json");
+  const users = readJSON("users.json");
 
-  orders.push(newOrder);
-  writeJSON(ordersFile, orders);
+  const reqItem = requests.find(r => r.id === requestId);
+  if (!reqItem || reqItem.status !== "pending")
+    return res.status(400).json({ error: "Invalid request" });
 
-  res.json({ message: 'Order created successfully' });
+  const user = users.find(u => u.username === reqItem.username);
+  user.balance += Number(reqItem.amount);
+  reqItem.status = "approved";
+
+  writeJSON("users.json", users);
+  writeJSON("requests.json", requests);
+
+  res.json({ message: "Approved and wallet funded" });
 });
 
-/* =======================
-   SERVER
-======================= */
+// ---------- HEALTH ----------
+app.get("/", (req, res) => res.send("Joetech backend running"));
 
-app.get('/', (req, res) => {
-  res.send('Joetech Backend is running 🚀');
-});
-
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log("Server running on " + PORT));
