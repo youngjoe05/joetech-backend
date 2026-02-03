@@ -40,6 +40,36 @@ function auth(req, res, next) {
   }
 }
 
+/* ===================== SERVICES DATA ===================== */
+const servicesList = [
+  // Telegram
+  { name: "Telegram channel/group members (30 days)", min: 10, price: 1209 },
+  { name: "Telegram bot stats (worldwide)", min: 100, price: 639 },
+  { name: "Telegram channel comments", min: 10, price: 2997 },
+  { name: "Telegram post views", min: 100, price: 97 },
+  { name: "Telegram story views (worldwide)", min: 10, price: 703 },
+  { name: "Telegram poll votes", min: 10, price: 790 },
+
+  // TikTok
+  { name: "TikTok followers (non-drop)", min: 10, price: 1829 },
+  { name: "TikTok likes (non-drop)", min: 100, price: 199 },
+  { name: "TikTok video views", min: 100, price: 157 },
+  { name: "TikTok shares", min: 100, price: 213 },
+  { name: "TikTok USA followers", min: 10, price: 7348 },
+
+  // Instagram
+  { name: "Instagram non-drop followers", min: 10, price: 5406 },
+  { name: "Instagram likes", min: 100, price: 672 },
+  { name: "Instagram video/reels views", min: 100, price: 124 },
+
+  // Facebook
+  { name: "Facebook profile/page followers", min: 10, price: 690 },
+  { name: "Facebook post likes", min: 10, price: 428 },
+
+  // YouTube
+  { name: "YouTube verified account comments", min: 10, price: 2940 }
+];
+
 /* ===================== AUTH ROUTES ===================== */
 app.post("/signup", async (req, res) => {
   try {
@@ -172,6 +202,11 @@ app.post("/admin/approve-funding", auth, (req, res) => {
   writeJSON("requests.json", requests);
 
   res.json({ message: "Funding approved" });
+});
+
+/* ===================== SERVICES ROUTE ===================== */
+app.get("/services", (req, res) => {
+  res.json(servicesList);
 });
 
 /* ===================== HEALTH ===================== */
